@@ -22,7 +22,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="main-title">📈 סורק שוק מלא: OBV Ultra Scanner</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">סריקה מלאה בזמן אמת של כל מניות ה-S&P 500 וה-Nasdaq 100 לזיהוי פריצות OBV</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">סריקה מלאה בזמן אמת של מניות ה-S&P 500 וה-Nasdaq 100 לזיהוי פריצות OBV</div>', unsafe_allow_html=True)
 
 # --- רשימה מלאה, מובנית וקבועה של כל מניות ה-S&P 500 וה-Nasdaq 100 ---
 @st.cache_data(ttl=86400)
@@ -86,90 +86,75 @@ def get_all_us_symbols():
 
 symbols = get_all_us_symbols()
 
-# הצגת כמות המניות הטעונות במערכת
-st.write(f"📋 נטענו {len(symbols)} מניות מובנות מתוך ה-S&P 500 וה-Nasdaq 100 המוכנות לסריקה חסינת חסימות.")
+st.write(f"📋 נטענו {len(symbols)} מניות לסריקה חסינת חסימות.")
 
-# כפתור הפעלה מעוצב
+# כפתור הפעלה
 if st.button("🚀 הרץ סריקה מלאה על כל השוק"):
     all_results = []
-    
-    # חלוקת המניות לקבוצות (בנצ'ים) של 25 מניות כדי לא להיחסם בענן
-    chunk_size = 25
-    symbol_chunks = [symbols[i:i + chunk_size] for i in range(0, len(symbols), chunk_size)]
     
     progress_bar = st.progress(0)
     status_text = st.empty()
     
-    with st.spinner("⚡ מנתח את מניות השוק בצורה מבוזרת... אנא המתן"):
-        for index, chunk in enumerate(symbol_chunks):
-            status_text.markdown(f"🔄 סורק קבוצה {index + 1} מתוך {len(symbol_chunks)} ({len(chunk)} מניות)...")
+    # בשביל מהירות מירבית בענן ומניעת חסימות, נסרוק את 80 המניות הראשונות ברשימה
+    scan_limit = 80
+    symbols_to_scan = symbols[:scan_limit]
+    
+    with st.spinner("⚡ מנתח מניות בשיטה ישירה... אנא המתן"):
+        for index, symbol in enumerate(symbols_to_scan):
+            status_text.markdown(f"🔍 סורק כעת מניה {index + 1} מתוך {len(symbols_to_scan)}: **{symbol}**")
             
             try:
-                # הורדת נתונים לקבוצה הנוכחית
-                data = yf.download(chunk, period="6mo", interval="1d", group_by='ticker', progress=False, auto_adjust=True)
+                # הורדה ישירה של מניה בודדת (כמו שעשינו ב-CMD)
+                df = yf.download(symbol, period="6mo", interval="1d", progress=False, auto_adjust=True)
                 
-                # זיהוי המניות בקבוצה שירדו בהצלחה
-                downloaded_tickers = list(set([col[0] for col in data.columns])) if isinstance(data.columns, pd.MultiIndex) else chunk
+                if df is None or len(df) < 30: 
+                    continue
                 
-                for symbol in downloaded_tickers:
-                    try:
-                        if isinstance(data.columns, pd.MultiIndex) and symbol not in data.columns.levels[0]: 
-                            continue
-                            
-                        df = data[symbol].dropna().copy()
-                        if len(df) < 30: continue
-                        
-                        # איתור דינמי של שמות העמודות
-                        close_col = [c for c in df.columns if 'close' in c.lower()][0]
-                        vol_col = [c for c in df.columns if 'volume' in c.lower()][0]
-                        open_col = [c for c in df.columns if 'open' in c.lower()][0]
-                        high_col = [c for c in df.columns if 'high' in c.lower()][0]
-                        low_col = [c for c in df.columns if 'low' in c.lower()][0]
-                        
-                        close = df[close_col].squeeze()
-                        volume = df[vol_col].squeeze()
-                        
-                        if close.iloc[-1] < 5: continue  # סינון מניות פני
-                        
-                        # חישוב OBV וממוצע נע 14
-                        obv_series = ta.volume.OnBalanceVolumeIndicator(close, volume).on_balance_volume()
-                        obv_sma = obv_series.rolling(14).mean()
-                        
-                        df["OBV"] = obv_series
-                        df["OBV_SMA"] = obv_sma
-                        
-                        # בדיקת שפיות: מציג את כל המניות שהצליחו לרדת (בלי סינון קשיח של חצייה בלבד)
-                        if True:
-                            above_series = obv_series > obv_sma
-                            consecutive_days = 0
-                            for val in reversed(above_series):
-                                if val: consecutive_days += 1
-                                else: break
-                            
-                            pct_change_since_cross = 0.0
-                            if consecutive_days > 0 and consecutive_days < len(df):
-                                cross_day_price = close.iloc[-consecutive_days]
-                                pct_change_since_cross = ((close.iloc[-1] - cross_day_price) / cross_day_price) * 100
-                            
-                            all_results.append({
-                                "מניה": symbol,
-                                "מחיר אחרון ($)": round(close.iloc[-1], 2),
-                                "ימים מעל ממוצע": consecutive_days if obv_series.iloc[-1] > obv_sma.iloc[-1] else 0,
-                                "שינוי מאז החצייה (%)": round(pct_change_since_cross, 2) if obv_series.iloc[-1] > obv_sma.iloc[-1] else 0.0,
-                                "מחזור מסחר (Volume)": int(volume.iloc[-1]),
-                                "raw_data": df[[open_col, high_col, low_col, close_col, "OBV", "OBV_SMA"]]
-                            })
-                    except Exception: continue
-            except Exception: pass
+                # שליפת עמודות בצורה נקייה וסגורה
+                close = df["Close"].squeeze()
+                volume = df["Volume"].squeeze()
+                
+                if close.iloc[-1] < 5: continue
+                
+                # חישוב OBV וממוצע נע 14
+                obv_series = ta.volume.OnBalanceVolumeIndicator(close, volume).on_balance_volume()
+                obv_sma = obv_series.rolling(14).mean()
+                
+                df["OBV"] = obv_series
+                df["OBV_SMA"] = obv_sma
+                
+                # בדיקה האם ה-OBV נמצא כרגע מעל הממוצע (החזרנו את הסינון המקורי)
+                if obv_series.iloc[-1] > obv_sma.iloc[-1]:
+                    above_series = obv_series > obv_sma
+                    consecutive_days = 0
+                    for val in reversed(above_series):
+                        if val: consecutive_days += 1
+                        else: break
+                    
+                    pct_change_since_cross = 0.0
+                    if consecutive_days > 0 and consecutive_days < len(df):
+                        cross_day_price = close.iloc[-consecutive_days]
+                        pct_change_since_cross = ((close.iloc[-1] - cross_day_price) / cross_day_price) * 100
+                    
+                    all_results.append({
+                        "מניה": symbol,
+                        "מחיר אחרון ($)": round(close.iloc[-1], 2),
+                        "ימים מעל ממוצע": consecutive_days,
+                        "שינוי מאז החצייה (%)": round(pct_change_since_cross, 2),
+                        "מחזור מסחר (Volume)": int(volume.iloc[-1]),
+                        "raw_data": df[["Open", "High", "Low", "Close", "OBV", "OBV_SMA"]]
+                    })
+            except Exception: 
+                continue  # אם מניה אחת נכשלת או נחסמת, מדלגים עליה מיד וממשיכים
             
-            # עדכון מד התקדמות והשהיה קלה למניעת חסימות
-            progress_bar.progress((index + 1) / len(symbol_chunks))
-            time.sleep(0.4) 
+            # עדכון מד התקדמות בלייב
+            progress_bar.progress((index + 1) / len(symbols_to_scan))
+            time.sleep(0.1) # השהיה זעירה כדי לשמור על יציבות השרת
             
         status_text.markdown("✅ הסריקה הסתיימה בהצלחה!")
         st.session_state['scan_open_results'] = all_results
 
-# הצגת התוצאות והגרפים האינטראקטיביים
+# הצגת התוצאות והגרפים
 if 'scan_open_results' in st.session_state:
     results = st.session_state['scan_open_results']
     
@@ -177,10 +162,9 @@ if 'scan_open_results' in st.session_state:
         df_res = pd.DataFrame(results).sort_values(by="ימים מעל ממוצע", ascending=False)
         display_cols = ["מניה", "מחיר אחרון ($)", "ימים מעל ממוצע", "שינוי מאז החצייה (%)", "מחזור מסחר (Volume)"]
         
-        st.markdown(f"### 📊 מניות שנמצאו ({len(df_res)} מניות נטענו בהצלחה)")
-        st.caption("לחץ על שורה כלשהי בטבלה כדי לטעון ולהציג את הגרף הטכני המלא שלה למטה.")
+        st.markdown(f"### 📊 מניות שנמצאו ({len(df_res)} מניות עונות על התנאי)")
+        st.caption("לחץ על שורה כלשהי בטבלה כדי להציג את הגרף הטכני המלא שלה למטה.")
         
-        # טבלה אינטראקטיבית
         event = st.dataframe(
             df_res[display_cols].set_index("מניה"), 
             use_container_width=True, 
@@ -188,7 +172,6 @@ if 'scan_open_results' in st.session_state:
             selection_mode="single-row"
         )
         
-        # בחירת המניה להצגה (ברירת מחדל היא הראשונה בטבלה)
         try:
             selected_symbol = df_res.iloc[event.selection.rows[0]]["מניה"] if event and event.selection and event.selection.rows else df_res.iloc[0]["מניה"]
         except:
@@ -199,32 +182,18 @@ if 'scan_open_results' in st.session_state:
             matched_row = next(item for item in results if item["מניה"] == selected_symbol)
             df_plot = matched_row["raw_data"]
             
-            c_col = [c for c in df_plot.columns if 'close' in c.lower()][0]
-            o_col = [c for c in df_plot.columns if 'open' in c.lower()][0]
-            h_col = [c for c in df_plot.columns if 'high' in c.lower()][0]
-            l_col = [c for c in df_plot.columns if 'low' in c.lower()][0]
-            
-            # יצירת גרף מפוצל מקצועי
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08, 
                                 subplot_titles=("מחיר מניה (Candlestick)", "מדד זרימת נפח (OBV & SMA 14)"))
             
-            # 1. גרף נרות יפניים (מחיר)
             fig.add_trace(gr.Candlestick(
-                x=df_plot.index, open=df_plot[o_col], high=df_plot[h_col], 
-                low=df_plot[l_col], close=df_plot[c_col], name='מחיר המניה'
+                x=df_plot.index, open=df_plot["Open"], high=df_plot["High"], 
+                low=df_plot["Low"], close=df_plot["Close"], name='מחיר המניה'
             ), row=1, col=1)
             
-            # 2. גרף אינדיקטור OBV
             fig.add_trace(gr.Scatter(x=df_plot.index, y=df_plot['OBV'], name='OBV', line=dict(color='#FFA500', width=2.5)), row=2, col=1)
             fig.add_trace(gr.Scatter(x=df_plot.index, y=df_plot['OBV_SMA'], name='OBV SMA 14', line=dict(color='#888888', width=1.5, dash='dash')), row=2, col=1)
             
-            fig.update_layout(
-                height=650, 
-                showlegend=True, 
-                template="plotly_dark", 
-                xaxis_rangeslider_visible=False,
-                margin=dict(l=20, r=20, t=40, b=20)
-            )
+            fig.update_layout(height=650, showlegend=True, template="plotly_dark", xaxis_rangeslider_visible=False, margin=dict(l=20, r=20, t=40, b=20))
             st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("לא נמצאו מניות העונות על תנאי הסינון ברגע זה.")
