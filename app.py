@@ -82,7 +82,6 @@ def get_all_us_symbols():
         "WY", "WYNN", "XEC", "XEL", "XLNX", "XOM", "XRAY", "XRX", "XYL", "YUM",
         "ZBH", "ZBRA", "ZION", "ZTS"
     ]
-    # ניקוי כפילויות ומיון אלפביתי
     return sorted(list(set(raw_list)))
 
 symbols = get_all_us_symbols()
@@ -139,7 +138,8 @@ if st.button("🚀 הרץ סריקה מלאה על כל השוק"):
                         df["OBV"] = obv_series
                         df["OBV_SMA"] = obv_sma
                         
-                        if obv_series.iloc[-1] > obv_sma.iloc[-1]:
+                        # בדיקת שפיות: מציג את כל המניות שהצליחו לרדת (בלי סינון קשיח של חצייה בלבד)
+                        if True:
                             above_series = obv_series > obv_sma
                             consecutive_days = 0
                             for val in reversed(above_series):
@@ -154,8 +154,8 @@ if st.button("🚀 הרץ סריקה מלאה על כל השוק"):
                             all_results.append({
                                 "מניה": symbol,
                                 "מחיר אחרון ($)": round(close.iloc[-1], 2),
-                                "ימים מעל ממוצע": consecutive_days,
-                                "שינוי מאז החצייה (%)": round(pct_change_since_cross, 2),
+                                "ימים מעל ממוצע": consecutive_days if obv_series.iloc[-1] > obv_sma.iloc[-1] else 0,
+                                "שינוי מאז החצייה (%)": round(pct_change_since_cross, 2) if obv_series.iloc[-1] > obv_sma.iloc[-1] else 0.0,
                                 "מחזור מסחר (Volume)": int(volume.iloc[-1]),
                                 "raw_data": df[[open_col, high_col, low_col, close_col, "OBV", "OBV_SMA"]]
                             })
@@ -177,7 +177,7 @@ if 'scan_open_results' in st.session_state:
         df_res = pd.DataFrame(results).sort_values(by="ימים מעל ממוצע", ascending=False)
         display_cols = ["מניה", "מחיר אחרון ($)", "ימים מעל ממוצע", "שינוי מאז החצייה (%)", "מחזור מסחר (Volume)"]
         
-        st.markdown(f"### 📊 מניות שנמצאו ({len(df_res)} מניות מתוך השוק שעונות על התנאי)")
+        st.markdown(f"### 📊 מניות שנמצאו ({len(df_res)} מניות נטענו בהצלחה)")
         st.caption("לחץ על שורה כלשהי בטבלה כדי לטעון ולהציג את הגרף הטכני המלא שלה למטה.")
         
         # טבלה אינטראקטיבית
