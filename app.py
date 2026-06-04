@@ -42,7 +42,9 @@ def get_us_symbols():
 
 @st.cache_data(ttl=3600)
 def load_scanner_data(symbols):
-    return yf.download(symbols, period='6mo', interval='1d', group_by='ticker', progress=False, auto_adjust=True)
+    # Forced auto_adjust and clean multi-index download
+    df = yf.download(symbols, period='6mo', interval='1d', group_by='ticker', progress=False, auto_adjust=True)
+    return df
 
 symbols = get_us_symbols()
 
@@ -50,32 +52,52 @@ if st.button('🚀 Run Live Market Scanner'):
     with st.spinner('⚡ Downloading and analyzing market data... Please wait'):
         data = load_scanner_data(symbols)
         all_results = []
-        for symbol in symbols:
+        
+        # Get all successfully downloaded tickers from the columns
+        downloaded_tickers = list(set([col[0] for col in data.columns])) if isinstance(data.columns, pd.MultiIndex) else []
+        
+        for symbol in downloaded_tickers:
             try:
-                if symbol not in data.columns.levels[0]: continue
                 df = data[symbol].dropna().copy()
                 if len(df) < 30: continue
-                close = df['Close'].squeeze()
-                volume = df['Volume'].squeeze()
+                
+                # Dynamic column resolution to stay bulletproof
+                close_col = [c for c in df.columns if 'close' in c.lower()][0]
+                vol_col = [c for c in df.columns if 'volume' in c.lower()][0]
+                open_col = [c for c in df.columns if 'open' in c.lower()][0]
+                high_col = [c for c in df.columns if 'high' in c.lower()][0]
+                low_col = [c for c in df.columns if 'low' in c.lower()][0]
+                
+                close = df[close_col].squeeze()
+                volume = df[vol_col].squeeze()
+                
+                if close.iloc[-1] < 5: continue # Skip penny stocks
+                
                 obv_series = ta.volume.OnBalanceVolumeIndicator(close, volume).on_balance_volume()
                 obv_sma = obv_series.rolling(14).mean()
+                
                 df['OBV'] = obv_series
                 df['OBV_SMA'] = obv_sma
-                is_above_now = obv_series.iloc[-1] > obv_sma.iloc[-1]
-                if is_above_now:
+                
+                if obv_series.iloc[-1] > obv_sma.iloc[-1]:
                     above_series = obv_series > obv_sma
                     consecutive_days = 0
                     for val in reversed(above_series):
                         if val: consecutive_days += 1
                         else: break
+                    
                     pct_change_since_cross = 0.0
                     if consecutive_days > 0 and consecutive_days < len(df):
                         cross_day_price = close.iloc[-consecutive_days]
                         pct_change_since_cross = ((close.iloc[-1] - cross_day_price) / cross_day_price) * 100
-                    if close.iloc[-1] < 5: continue
+                    
                     all_results.append({
-                        'Symbol': symbol, 'Price ($)': round(close.iloc[-1], 2), 'Days Above SMA': consecutive_days,
-                        'Change Since Cross (%)': round(pct_change_since_cross, 2), 'Volume': int(volume.iloc[-1]), 'raw_data': df
+                        'Symbol': symbol, 
+                        'Price ($)': round(close.iloc[-1], 2), 
+                        'Days Above SMA': consecutive_days,
+                        'Change Since Cross (%)': round(pct_change_since_cross, 2), 
+                        'Volume': int(volume.iloc[-1]), 
+                        'raw_data': df[[open_col, high_col, low_col, close_col, 'OBV', 'OBV_SMA']]
                     })
             except Exception: continue
         st.session_state['scan_open_results'] = all_results
@@ -89,18 +111,23 @@ if 'scan_open_results' in st.session_state:
         st.caption('Click on any row to load and display its technical chart below.')
         event = st.dataframe(df_res[display_cols].set_index('Symbol'), use_container_width=True, on_select='rerun', selection_mode='single-row')
         
-        # Safe selection fallback
         try:
             selected_symbol = df_res.iloc[event.selection.rows[0]]['Symbol'] if event and event.selection and event.selection.rows else df_res.iloc[0]['Symbol']
         except:
-            selected_symbol = df_res.iloc[0]['Symbol']
+            selected_symbol = df_res.iloc[0]['Symbol'] if len(df_res) > 0 else None
             
         if selected_symbol:
             st.markdown(f'### 🎯 Technical Analysis: **{selected_symbol}**')
             matched_row = next(item for item in results if item['Symbol'] == selected_symbol)
             df_plot = matched_row['raw_data']
+            
+            c_col = [c for c in df_plot.columns if 'close' in c.lower()][0]
+            o_col = [c for c in df_plot.columns if 'open' in c.lower()][0]
+            h_col = [c for c in df_plot.columns if 'high' in c.lower()][0]
+            l_col = [c for c in df_plot.columns if 'low' in c.lower()][0]
+            
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.06, subplot_titles=('Price (Candlestick)', 'OBV & SMA 14'))
-            fig.add_trace(gr.Candlestick(x=df_plot.index, open=df_plot['Open'], high=df_plot['High'], low=df_plot['Low'], close=df_plot['Close'], name='Price'), row=1, col=1)
+            fig.add_trace(gr.Candlestick(x=df_plot.index, open=df_plot[o_col], high=df_plot[h_col], low=df_plot[l_col], close=df_plot[c_col], name='Price'), row=1, col=1)
             fig.add_trace(gr.Scatter(x=df_plot.index, y=df_plot['OBV'], name='OBV', line=dict(color='#00D2FF', width=2.5)), row=2, col=1)
             fig.add_trace(gr.Scatter(x=df_plot.index, y=df_plot['OBV_SMA'], name='SMA 14', line=dict(color='#FF416C', width=1.5, dash='dash')), row=2, col=1)
             fig.update_layout(height=700, showlegend=True, template='plotly_dark', xaxis_rangeslider_visible=False, margin=dict(l=20, r=20, t=40, b=20))
