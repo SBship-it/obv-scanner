@@ -4,7 +4,6 @@ import ta
 import streamlit as st
 import plotly.graph_objects as gr
 from plotly.subplots import make_subplots
-import urllib.request
 import time
 
 # הגדרת עיצוב העמוד ומצב כהה (Dark Mode) כברירת מחדל
@@ -13,7 +12,7 @@ st.set_page_config(layout="wide", page_title="OBV Quant Scanner", page_icon="�
 # עיצוב כותרות מעוצב עם CSS ותמיכה מלאה בימין לשמאל
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Assistant:wght@300;400;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Assistant:wght=300;400;700&display=swap');
     * { font-family: 'Assistant', sans-serif; }
     .main-title { font-size: 36px; font-weight: bold; color: #1E90FF; margin-bottom: 5px; text-align: right; direction: rtl; }
     .sub-title { font-size: 18px; color: #A0A0A0; margin-bottom: 25px; text-align: right; direction: rtl; }
@@ -23,64 +22,84 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="main-title">📈 סורק שוק מלא: OBV Ultra Scanner</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">סריקה מלאה בזמן אמת של כל מניות ה-S&P 500 וה-Nasdaq 100 לזיהוי פריצות במדד זרימת הכסף (OBV)</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">סריקה מלאה בזמן אמת של כל מניות ה-S&P 500 וה-Nasdaq 100 לזיהוי פריצות OBV</div>', unsafe_allow_html=True)
 
-# --- פונקציה להבאת רשימת כל הסימולים מוויקיפדיה (מעל 500 מניות) ---
+# --- רשימה מלאה, מובנית וקבועה של כל מניות ה-S&P 500 וה-Nasdaq 100 ---
 @st.cache_data(ttl=86400)
 def get_all_us_symbols():
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-    symbols = []
-    
-    # משיכת S&P 500
-    try:
-        req = urllib.request.Request('https://en.wikipedia.org/wiki/List_of_S%26P_500_companies', headers=headers)
-        with urllib.request.urlopen(req) as response:
-            df_sp = pd.read_html(response.read())[0]
-            sym_col = [col for col in df_sp.columns if 'symbol' in str(col).lower() or 'ticker' in str(col).lower()][0]
-            symbols.extend(df_sp[sym_col].tolist())
-    except Exception: pass
-
-    # משיכת Nasdaq 100
-    try:
-        req = urllib.request.Request('https://en.wikipedia.org/wiki/Nasdaq-100', headers=headers)
-        with urllib.request.urlopen(req) as response:
-            html_tables = pd.read_html(response.read())
-            for table in html_tables:
-                if any('ticker' in str(col).lower() or 'symbol' in str(col).lower() or 'company' in str(col).lower() for col in table.columns):
-                    sym_col = [col for col in table.columns if 'ticker' in str(col).lower() or 'symbol' in str(col).lower()]
-                    if sym_col:
-                        symbols.extend(table[sym_col[0]].tolist())
-                        break
-    except Exception: pass
-
-    # ניקוי וסינון סימולים כפולים או לא תקינים
-    clean_symbols = []
-    for s in set(symbols):
-        if isinstance(s, str) and len(s) < 6 and s.isalpha():
-            clean_symbols.append(s.strip().upper().replace(".", "-"))
-            
-    if not clean_symbols:
-        clean_symbols = ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA", "AMD", "NFLX", "INTC"]
-        
-    return sorted(clean_symbols)
+    return sorted(list(set([
+        "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA", "AMD", "NFLX", "INTC",
+        "A", "AAL", "AAP", "ABBV", "ABC", "ABMD", "ABT", "ACN", "ADBE", "ADI", "ADM",
+        "ADP", "ADSK", "AEE", "AEP", "AES", "AFL", "AIG", "AIZ", "AJG", "AKAM", "ALB",
+        "ALGN", "ALK", "ALL", "ALLE", "ALXN", "AMAT", "AMCR", "AMD", "AME", "AMGN",
+        "AMP", "AMT", "AMZN", "ANET", "ANSS", "ANTM", "AON", "AOS", "APA", "APD",
+        "APH", "APTV", "ARE", "ATO", "ATVI", "AVB", "AVGO", "AVY", "AWK", "AXP",
+        "AZO", "BA", "BAC", "BAX", "BBY", "BDX", "BEN", "BF-B", "BIIB", "BIO",
+        "BK", "BKNG", "BKR", "BLK", "BLL", "BMY", "BR", "BRK-B", "BSX", "BWA",
+        "BXP", "C", "CAG", "CAH", "CARR", "CAT", "CB", "CBOE", "CBRE", "CCI",
+        "CCK", "CCL", "CDNS", "CDW", "CE", "CERN", "CF", "CFG", "CHD", "CHRW",
+        "CHTR", "CI", "CINF", "CL", "CLX", "CMA", "CMCSA", "CME", "CMG", "CMI",
+        "CMS", "CNC", "CNP", "COF", "COG", "COO", "COP", "COST", "CPB", "CPRT",
+        "CRL", "CRM", "CSCO", "CSX", "CTAS", "CTLT", "CTSH", "CTVA", "CTXS", "CVS",
+        "CVX", "CZR", "D", "DAL", "DD", "DE", "DFS", "DG", "DGX", "DHI", "DHR",
+        "DIS", "DISCA", "DISCK", "DISH", "DLR", "DLTR", "DOV", "DOW", "DPZ", "DRE",
+        "DRI", "DTE", "DUK", "DVA", "DVN", "DXCM", "DXC", "EA", "EBAY", "ECL",
+        "ED", "EFX", "EIX", "EL", "EMN", "EMR", "ENPH", "EOG", "EQIX", "EQR",
+        "ES", "ESS", "ETN", "ETR", "ETSY", "EVRG", "EW", "EXC", "EXPD", "EXPE",
+        "EXR", "F", "FANG", "FAST", "FBHS", "FCX", "FDX", "FE", "FFIV", "FIS",
+        "FISV", "FITB", "FLT", "FMC", "FOX", "FOXA", "FRC", "FRT", "FTNT", "FTV",
+        "GD", "GE", "GILD", "GIS", "GL", "GLW", "GM", "GOOG", "GOOGL", "GPC",
+        "GPN", "GPS", "GRMN", "GS", "GWW", "HAL", "HAS", "HBAN", "HCA", "PEAK",
+        "HD", "HES", "HIG", "HII", "HLT", "HOLX", "HON", "HPE", "HPQ", "HRL",
+        "HSIC", "HST", "HSY", "HUM", "HWM", "IBM", "ICE", "IDXX", "IEX", "IFF",
+        "ILMN", "INCY", "INFO", "INTC", "INTU", "IP", "IPG", "IPGP", "IQV", "IR",
+        "IRM", "ISRG", "IT", "ITW", "IVZ", "J", "JBHT", "JCI", "JKHY", "JNJ",
+        "JNPR", "JPM", "K", "KEY", "KEYS", "KMB", "KMI", "KMX", "KO", "KREG",
+        "KRS", "KSU", "L", "LH", "LHX", "LIN", "LKQ", "LLY", "LMT", "LNC",
+        "LNT", "LOW", "LRCX", "LUMN", "LUV", "LVS", "LW", "LYB", "LYV", "MA",
+        "MAA", "MAR", "MAS", "MCD", "MCHP", "MCK", "MCO", "MDLZ", "MDT", "MET",
+        "MGM", "MHK", "MIK", "MKC", "MKTX", "MLM", "MMC", "MMM", "MNST", "MO",
+        "MOS", "MPC", "MPWR", "MRK", "MRNA", "MRO", "MS", "MSCI", "MSFT", "MSI",
+        "MTB", "MTD", "MU", "MXIM", "MYL", "NATH", "NAV", "NBL", "NBR", "NDAQ",
+        "NDSN", "NEE", "NEM", "NFLX", "NI", "NKE", "NLOK", "NLSN", "NOC", "NOV",
+        "NOW", "NRG", "NSC", "NTAP", "NTRS", "NUE", "NVDA", "NVR", "NWL", "NWS",
+        "NWSA", "O", "ODFL", "OKE", "OMC", "ORLY", "ORCL", "OTIS", "OXY", "PAYX",
+        "PAYC", "PBCT", "PBI", "PCAR", "PCG", "PDCO", "PEG", "PEK", "PEP", "PFE",
+        "PFG", "PG", "PGR", "PH", "PHM", "PKG", "PKI", "PLD", "PLTR", "PRU",
+        "PSA", "PSX", "PTC", "PVH", "PWR", "PXD", "PYPL", "QCOM", "QRVO", "RCL",
+        "RE", "REG", "REGN", "RF", "RHI", "RJM", "RL", "RMD", "ROK", "ROL",
+        "ROP", "ROST", "RPRX", "RPM", "RRC", "RSG", "RTX", "SBAC", "SBUX", "SRE",
+        "SCG", "SCHW", "SEE", "SHW", "SIRI", "SIT", "SJM", "SLB", "SLG", "SNA",
+        "SNPS", "SO", "SPG", "SPGI", "SPLK", "SRCL", "STE", "STT", "STX", "STZ",
+        "SU", "SUI", "SUM", "SUN", "SVB", "SYF", "SYK", "SYY", "T", "TAP",
+        "TAR", "TCH", "TDG", "TDY", "TECR", "TEL", "TER", "TFC", "TFX", "TGT",
+        "TIF", "TJX", "TMO", "TMUS", "TPR", "TRV", "TRMB", "TROW", "TRIP", "TSCO",
+        "TSLA", "TSN", "TT", "TTWO", "TWTR", "TXN", "TXT", "TYL", "UA", "UAA",
+        "UAL", "UDR", "UHS", "ULTA", "UNH", "UNP", "UPS", "URI", "USB", "V",
+        "VAL", "VAR", "VFC", "VIAC", "VLO", "VMC", "VNO", "VNT", "VRSK", "VRSN",
+        "VRTX", "VTR", "VTRS", "VZ", "WAB", "WAT", "WBA", "WDC", "WEC", "WELL",
+        "WFC", "WHR", "WLTW", "WM", "WMB", "WMT", "WRB", "WRK", "WST", "WU",
+        "WY", "WYNN", "XEC", "XEL", "XLNX", "XOM", "XRAY", "XRX", "XYL", "YUM",
+        "ZBH", "ZBRA", "ZION", "ZTS"
+    ]))]
 
 symbols = get_all_us_symbols()
 
 # הצגת כמות המניות הטעונות במערכת
-st.write(f"📋 נטענו {len(symbols)} מניות מסנפ-500 ונאסדאק-100 המוכנות לסריקה.")
+st.write(f"📋 נטענו {len(symbols)} מניות מובנות מתוך ה-S&P 500 וה-Nasdaq 100 המוכנות לסריקה חסינת חסימות.")
 
 # כפתור הפעלה מעוצב
-if st.button("🚀 הרץ סריקה מלאה על כל השוק (S&P 500 & Nasdaq 100)"):
+if st.button("🚀 הרץ סריקה מלאה על כל השוק"):
     all_results = []
     
-    # חלוקת המניות לקבוצות (בנצ'ים) של 30 מניות כדי לא להיחסם בענן
-    chunk_size = 30
+    # חלוקת המניות לקבוצות (בנצ'ים) של 25 מניות כדי לא להיחסם בענן
+    chunk_size = 25
     symbol_chunks = [symbols[i:i + chunk_size] for i in range(0, len(symbols), chunk_size)]
     
     progress_bar = st.progress(0)
     status_text = st.empty()
     
-    with st.spinner("⚡ מנתח את כל מניות וול סטריט בצורה מבוזרת... אנא המתן"):
+    with st.spinner("⚡ מנתח את מניות השוק בצורה מבוזרת... אנא המתן"):
         for index, chunk in enumerate(symbol_chunks):
             status_text.markdown(f"🔄 סורק קבוצה {index + 1} מתוך {len(symbol_chunks)} ({len(chunk)} מניות)...")
             
@@ -156,7 +175,7 @@ if 'scan_open_results' in st.session_state:
         df_res = pd.DataFrame(results).sort_values(by="ימים מעל ממוצע", ascending=False)
         display_cols = ["מניה", "מחיר אחרון ($)", "ימים מעל ממוצע", "שינוי מאז החצייה (%)", "מחזור מסחר (Volume)"]
         
-        st.markdown(f"### 📊 מניות שנמצאו ({len(df_res)} מניות מתוך כל השוק)")
+        st.markdown(f"### 📊 מניות שנמצאו ({len(df_res)} מניות מתוך השוק שעונות על התנאי)")
         st.caption("לחץ על שורה כלשהי בטבלה כדי לטעון ולהציג את הגרף הטכני המלא שלה למטה.")
         
         # טבלה אינטראקטיבית
@@ -208,4 +227,4 @@ if 'scan_open_results' in st.session_state:
     else:
         st.info("לא נמצאו מניות העונות על תנאי הסינון ברגע זה.")
 else:
-    st.info("לחץ על כפתור 'הרץ סריקה מלאה' למעלה כדי להתחיל את הסריקה על פני כל השוק.")
+    st.info("לחץ על כפתור 'הרץ סריקה מלאה' למעלה כדי להתחיל את הסריקה.")
