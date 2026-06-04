@@ -4,7 +4,6 @@ import ta
 import streamlit as st
 import plotly.graph_objects as gr
 from plotly.subplots import make_subplots
-import time
 
 # הגדרת עיצוב העמוד ומצב כהה (Dark Mode) כברירת מחדל
 st.set_page_config(layout="wide", page_title="OBV Quant Scanner", page_icon="📈")
@@ -22,9 +21,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="main-title">📈 סורק שוק מלא: OBV Ultra Scanner</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">סריקה מלאה בזמן אמת של מניות ה-S&P 500 וה-Nasdaq 100 לזיהוי פריצות OBV</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">סריקה מלאה בזמן אמת (ומחוץ לשעות המסחר) של מניות ה-S&P 500 וה-Nasdaq 100</div>', unsafe_allow_html=True)
 
-# --- רשימה מלאה, מובנית וקבועה של כל מניות ה-S&P 500 וה-Nasdaq 100 ---
+# --- רשימה מלאה של כל מניות ה-S&P 500 וה-Nasdaq 100 ---
 @st.cache_data(ttl=86400)
 def get_all_us_symbols():
     raw_list = [
@@ -85,45 +84,43 @@ def get_all_us_symbols():
     return sorted(list(set(raw_list)))
 
 symbols = get_all_us_symbols()
-
-st.write(f"📋 נטענו {len(symbols)} מניות לסריקה חסינת חסימות.")
+st.write(f"📋 מערכת עצמאית: טעונות {len(symbols)} מניות המוכנות לסריקה בכל שעה ביום ובסופ\"ש.")
 
 # כפתור הפעלה
-if st.button("🚀 הרץ סריקה מלאה על כל השוק"):
-    all_results = []
-    
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
-    # בשביל מהירות מירבית בענן ומניעת חסימות, נסרוק את 80 המניות הראשונות ברשימה
-    scan_limit = 80
-    symbols_to_scan = symbols[:scan_limit]
-    
-    with st.spinner("⚡ מנתח מניות בשיטה ישירה... אנא המתן"):
-        for index, symbol in enumerate(symbols_to_scan):
-            status_text.markdown(f"🔍 סורק כעת מניה {index + 1} מתוך {len(symbols_to_scan)}: **{symbol}**")
-            
+if st.button("🚀 הרץ סורק שוק חסין זמנים"):
+    with st.spinner("⚡ מוריד ומנתח את כל מניות וול סטריט ברגע זה..."):
+        # הורדה מהירה ומרוכזת של כל המניות בבת אחת
+        data = yf.download(symbols, period="6mo", interval="1d", group_by='ticker', progress=False, auto_adjust=True)
+        all_results = []
+        
+        # זיהוי המניות שירדו בהצלחה
+        downloaded_tickers = list(set([col[0] for col in data.columns])) if isinstance(data.columns, pd.MultiIndex) else symbols
+        
+        for symbol in downloaded_tickers:
             try:
-                # הורדה ישירה של מניה בודדת (כמו שעשינו ב-CMD)
-                df = yf.download(symbol, period="6mo", interval="1d", progress=False, auto_adjust=True)
+                df = data[symbol].copy()
                 
-                if df is None or len(df) < 30: 
-                    continue
+                # --- פתרון הזמנים: אם השורה האחרונה ריקה בגלל שהבורסה סגורה, מוחקים אותה ולוקחים את יום המסחר הקודם שסגור מלא ---
+                if df.empty: continue
+                if pd.isna(df.iloc[-1]["Close"]) or df.iloc[-1]["Volume"] == 0:
+                    df = df.iloc[:-1].copy()
                 
-                # שליפת עמודות בצורה נקייה וסגורה
+                df = df.dropna()
+                if len(df) < 30: continue
+                
                 close = df["Close"].squeeze()
                 volume = df["Volume"].squeeze()
                 
                 if close.iloc[-1] < 5: continue
                 
-                # חישוב OBV וממוצע נע 14
+                # חישוב אינדיקטורים
                 obv_series = ta.volume.OnBalanceVolumeIndicator(close, volume).on_balance_volume()
                 obv_sma = obv_series.rolling(14).mean()
                 
                 df["OBV"] = obv_series
                 df["OBV_SMA"] = obv_sma
                 
-                # בדיקה האם ה-OBV נמצא כרגע מעל הממוצע (החזרנו את הסינון המקורי)
+                # בדיקת תנאי האסטרטגיה (OBV מעל הממוצע)
                 if obv_series.iloc[-1] > obv_sma.iloc[-1]:
                     above_series = obv_series > obv_sma
                     consecutive_days = 0
@@ -144,14 +141,8 @@ if st.button("🚀 הרץ סריקה מלאה על כל השוק"):
                         "מחזור מסחר (Volume)": int(volume.iloc[-1]),
                         "raw_data": df[["Open", "High", "Low", "Close", "OBV", "OBV_SMA"]]
                     })
-            except Exception: 
-                continue  # אם מניה אחת נכשלת או נחסמת, מדלגים עליה מיד וממשיכים
+            except Exception: continue
             
-            # עדכון מד התקדמות בלייב
-            progress_bar.progress((index + 1) / len(symbols_to_scan))
-            time.sleep(0.1) # השהיה זעירה כדי לשמור על יציבות השרת
-            
-        status_text.markdown("✅ הסריקה הסתיימה בהצלחה!")
         st.session_state['scan_open_results'] = all_results
 
 # הצגת התוצאות והגרפים
@@ -162,8 +153,7 @@ if 'scan_open_results' in st.session_state:
         df_res = pd.DataFrame(results).sort_values(by="ימים מעל ממוצע", ascending=False)
         display_cols = ["מניה", "מחיר אחרון ($)", "ימים מעל ממוצע", "שינוי מאז החצייה (%)", "מחזור מסחר (Volume)"]
         
-        st.markdown(f"### 📊 מניות שנמצאו ({len(df_res)} מניות עונות על התנאי)")
-        st.caption("לחץ על שורה כלשהי בטבלה כדי להציג את הגרף הטכני המלא שלה למטה.")
+        st.markdown(f"### 📊 מניות שנמצאו ({len(df_res)} מניות עונות על תנאי ה-OBV)")
         
         event = st.dataframe(
             df_res[display_cols].set_index("מניה"), 
@@ -198,4 +188,4 @@ if 'scan_open_results' in st.session_state:
     else:
         st.info("לא נמצאו מניות העונות על תנאי הסינון ברגע זה.")
 else:
-    st.info("לחץ על כפתור 'הרץ סריקה מלאה' למעלה כדי להתחיל את הסריקה.")
+    st.info("לחץ על כפתור 'הרץ סורק שוק חסין זמנים' למעלה כדי להתחיל את הסריקה.")
