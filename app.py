@@ -64,14 +64,12 @@ def compute_stock_score(df_stock, obv_sma_p=14, rsi_p=14, rvol_mult=1.5):
         if obv.iloc[-1] > obv.rolling(obv_sma_p).mean().iloc[-1]:
             score += 2
 
-        # RSI: אזור כוח (50-70) — לא קנוי יתר
+        # RSI: אזור כוח (50-70)
         rsi = ta.momentum.RSIIndicator(close, window=rsi_p).rsi().iloc[-1]
         if 50 < rsi < 70:
             score += 2
-        elif rsi >= 70:
-            score += 0
 
-        # מחיר מעל SMA200 (בדיקה בטוחה שיש מספיק נתונים)
+        # מחיר מעל SMA200
         if len(close) >= 200:
             sma200 = close.rolling(200).mean()
             if not pd.isna(sma200.iloc[-1]) and close.iloc[-1] > sma200.iloc[-1]:
@@ -87,7 +85,7 @@ def compute_stock_score(df_stock, obv_sma_p=14, rsi_p=14, rvol_mult=1.5):
         if volume.iloc[-1] > vol_sma20 * rvol_mult:
             score += 1
 
-        # RSI Divergence: מחיר עולה, RSI יורד
+        # RSI Divergence
         rsi_series = ta.momentum.RSIIndicator(close, window=rsi_p).rsi()
         price_up = close.iloc[-1] > close.iloc[-5]
         rsi_down = rsi_series.iloc[-1] < rsi_series.iloc[-5]
@@ -117,9 +115,6 @@ def compute_stock_score(df_stock, obv_sma_p=14, rsi_p=14, rvol_mult=1.5):
 # חישוב p-value בינומי לאמינות סטטיסטית
 # ==========================================
 def binomial_pvalue(win_rate_pct, n_samples, null_hypothesis=0.5):
-    """
-    בודק האם Win Rate גבוה מ-50% באופן מובהק סטטיסטית.
-    """
     wins = int(round(win_rate_pct / 100 * n_samples))
     p_value = stats.binom_test(wins, n_samples, null_hypothesis, alternative='greater')
     return p_value
@@ -129,24 +124,18 @@ def binomial_pvalue(win_rate_pct, n_samples, null_hypothesis=0.5):
 # ==========================================
 @st.cache_data(ttl=86400)
 def get_us_symbols_with_sectors():
-    """
-    מושך באופן דינמי את כל מניות ה-S&P 500 וה-Nasdaq 100 מויקיפדיה,
-    מנקה את הטיקרים ובונה מילון סקטורים מלא (סביב 500-600 מניות ייחודיות).
-    """
     symbol_to_sector = {}
     opener = urllib.request.build_opener()
     opener.addheaders = [('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')]
     urllib.request.install_opener(opener)
 
-    # 1. משיכת כל מניות ה-S&P 500
+    # S&P 500
     try:
         url_sp = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
         tables = pd.read_html(url_sp)
         df_sp = tables[0]
-        
         sym_col = [col for col in df_sp.columns if 'symbol' in str(col).lower() or 'ticker' in str(col).lower()][0]
         sec_col = [col for col in df_sp.columns if 'sector' in str(col).lower() or 'industry' in str(col).lower()][0]
-        
         for _, row in df_sp.iterrows():
             sym = str(row[sym_col]).strip().upper().replace(".", "-")
             sec = str(row[sec_col]).strip()
@@ -155,20 +144,17 @@ def get_us_symbols_with_sectors():
     except Exception as e:
         st.warning(f"⚠️ לא הצלחתי לטעון את ה-S&P 500 מויקיפדיה: {e}")
 
-    # 2. משיכת כל מניות ה-Nasdaq 100
+    # Nasdaq 100
     try:
         url_ndx = 'https://en.wikipedia.org/wiki/Nasdaq-100'
         tables_ndx = pd.read_html(url_ndx)
-        
         for table in tables_ndx:
             if any('ticker' in str(col).lower() or 'symbol' in str(col).lower() for col in table.columns):
                 sym_col_name = [col for col in table.columns if 'ticker' in str(col).lower() or 'symbol' in str(col).lower()][0]
                 sec_col_name = [col for col in table.columns if 'industry' in str(col).lower() or 'sector' in str(col).lower()]
-                
                 for _, row in table.iterrows():
                     sym = str(row[sym_col_name]).strip().upper().replace(".", "-")
                     sec = str(row[sec_col_name[0]]).strip() if sec_col_name else "Nasdaq Tech"
-                    
                     if sym.replace("-", "").isalpha() and len(sym) < 6:
                         if sym not in symbol_to_sector:
                             symbol_to_sector[sym] = sec
@@ -176,11 +162,9 @@ def get_us_symbols_with_sectors():
     except Exception as e:
         st.warning(f"⚠️ לא הצלחתי לטעון את ה-Nasdaq 100 מויקיפדיה: {e}")
 
-    # 3. מנגנון הגנה למקרה ששני האתרים חסמו
     if not symbol_to_sector:
         return {"AAPL": "Technology", "MSFT": "Technology", "GOOGL": "Communication Services",
-                "AMZN": "Consumer Cyclical", "META": "Communication Services", "NVDA": "Technology",
-                "TSLA": "Consumer Cyclical", "AVGO": "Technology", "AMD": "Technology", "QCOM": "Technology"}
+                "AMZN": "Consumer Cyclical", "META": "Communication Services", "NVDA": "Technology"}
                 
     return symbol_to_sector
 
@@ -230,7 +214,7 @@ tab1, tab2, tab3 = st.tabs([
 # ==========================================
 with tab1:
     st.write("מפת שוק דינמית בסגנון TradingView המציגה עוצמת OBV, יחד עם פאנל מגמות היסטורי לזיהוי רוטציית סקטורים.")
-    st.caption(f"כמות מניות לניתוח: {len(symbols)} (S&P 500 & Nasdaq 100) | OBV SMA={obv_sma_period}")
+    st.caption(f"כמות מניות לניתוח: {len(symbols)} (S&P 500 & Nasdaq 100)")
 
     if st.button("🚀 הרץ סורק שוק ומגמות בזמן אמת"):
         with st.spinner(f"מוריד ומנתח {len(symbols)} נתוני שוק במקביל... אנא המתן."):
@@ -242,104 +226,94 @@ with tab1:
             failed_count = 0
 
             if not data.empty:
-                # שיטוח וסידור מחדש של ה-DataFrame למניעת בעיות אינדקסים כפולות של yfinance
+                # שליפת נתוני SPY בצורה בטוחה באמצעות .xs (Cross Section) שחוסך את בעיית האינדקסים
                 try:
-                    # הפיכת ה-MultiIndex הרחב למבנה שטוח ויציב
-                    stacked_data = data.stack(level=1).swaplevel(0, 1).sort_index()
-                except Exception as e:
-                    st.error(f"שגיאה בעיבוד מבנה הנתונים המרכזי: {e}")
-                    stacked_data = pd.DataFrame()
+                    spy_close = data.xs(key="SPY", axis=1, level=1 if "SPY" in data.columns.levels[1] else 0)["Close"]
+                    spy_data = pd.DataFrame({"Close": spy_close}).dropna()
+                except Exception:
+                    spy_data = pd.DataFrame()
 
-                if not stacked_data.empty:
-                    # שליפת נתוני SPY
+                # זיהוי אוטומטי באיזו רמה של ה-Columns נמצא הטיקר (0 או 1) לטובת שליפה בטוחה
+                ticker_level = 1 if any(sym in data.columns.levels[1] for sym in symbols if sym in data.columns.levels[1]) else 0
+
+                for symbol in symbols:
+                    if symbol in ["SPY", "^VIX"]:
+                        continue
                     try:
-                        spy_data = stacked_data.loc["SPY"].copy()
-                    except Exception:
-                        spy_data = pd.DataFrame()
-
-                    for symbol in symbols:
-                        if symbol in ["SPY", "^VIX"]:
-                            continue
-                        try:
-                            # שליפת נתוני המניה בצורה מאובטחת וישירה מהאינדקס השטוח
-                            if symbol not in stacked_data.index.levels[0]:
-                                failed_count += 1
-                                continue
-                                
-                            df = stacked_data.loc[symbol].copy()
-                            if df.empty or len(df) < 40:
-                                failed_count += 1
-                                continue
-
-                            # הבטחת שמות עמודות תקינים ונקיים משאריות טיפוסים של yfinance
-                            df.columns = [str(c) for c in df.columns]
-                            
-                            close = df["Close"].squeeze()
-                            volume = df["Volume"].squeeze()
-                            high = df["High"].squeeze()
-                            low = df["Low"].squeeze()
-
-                            # חישוב אינדיקטורים
-                            obv_series = ta.volume.OnBalanceVolumeIndicator(close, volume).on_balance_volume()
-                            obv_sma = obv_series.rolling(obv_sma_period).mean()
-
-                            df["OBV"] = obv_series
-                            df["OBV_SMA"] = obv_sma
-                            df["RSI"] = ta.momentum.RSIIndicator(close, window=rsi_period).rsi()
-                            df["CMF"] = ta.volume.ChaikinMoneyFlowIndicator(high, low, close, volume, window=20).chaikin_money_flow()
-                            df["SMA200"] = close.rolling(200).mean()
-
-                            if not spy_data.empty:
-                                df["Close_spy"] = spy_data["Close"]
-
-                            is_above_now = obv_series.iloc[-1] > obv_sma.iloc[-1]
-                            sec = stock_sector_dict.get(symbol, "General")
-
-                            is_above_series = obv_series > obv_sma
-                            last_30_days = is_above_series.tail(30)
-                            for date, status in last_30_days.items():
-                                daily_status_list.append({
-                                    "Date": date,
-                                    "Sector": sec,
-                                    "Is_Positive": 1 if status else 0
-                                })
-
-                            consecutive_days = 0
-                            for val in reversed(is_above_series):
-                                if val:
-                                    consecutive_days += 1
-                                else:
-                                    break
-
-                            pct_change_since_cross = 0.0
-                            if consecutive_days > 0 and consecutive_days < len(df):
-                                cross_day_price = close.iloc[-consecutive_days]
-                                pct_change_since_cross = ((close.iloc[-1] - cross_day_price) / cross_day_price) * 100
-
-                            estimated_cap = int(close.iloc[-1] * volume.rolling(20).mean().iloc[-1])
-                            if pd.isna(estimated_cap) or estimated_cap <= 0:
-                                estimated_cap = 1_000_000
-
-                            stock_score = compute_stock_score(df, obv_sma_p=obv_sma_period, rsi_p=rsi_period, rvol_mult=rvol_multiplier)
-
-                            raw_rows.append({
-                                "מניה": symbol, "סקטור_בסיס": sec, "is_above": is_above_now, "ימים ברצף": consecutive_days if is_above_now else -consecutive_days,
-                                "מחיר ($)": round(close.iloc[-1], 2), "RSI": round(df["RSI"].iloc[-1], 1) if not pd.isna(df["RSI"].iloc[-1]) else None,
-                                "CMF": round(df["CMF"].iloc[-1], 3) if not pd.isna(df["CMF"].iloc[-1]) else None,
-                                "שינוי (%)": round(pct_change_since_cross, 2) if is_above_now else round(((close.iloc[-1] - close.iloc[-2]) / close.iloc[-2]) * 100, 2),
-                                "גודל חברה": estimated_cap, "ניקוד (1-10)": stock_score, "df_data": df
-                            })
-
-                            if is_above_now and close.iloc[-1] >= min_price_filter:
-                                all_results.append({
-                                    "מניה": symbol, "סקטור": sec, "מחיר אחרון ($)": round(close.iloc[-1], 2), "ימים מעל ממוצע": consecutive_days,
-                                    "שינוי מאז החצייה (%)": round(pct_change_since_cross, 2), "RSI": round(df["RSI"].iloc[-1], 1) if not pd.isna(df["RSI"].iloc[-1]) else None,
-                                    "CMF": round(df["CMF"].iloc[-1], 3) if not pd.isna(df["CMF"].iloc[-1]) else None, "ניקוד (1-10)": stock_score,
-                                    "מחזור מסחר (Volume)": int(volume.iloc[-1]), "raw_data": df
-                                })
-                        except Exception:
+                        # שליפת נתוני מניה בטוחה ללא stack או שינוי מבני – חסין לכל גרסת yfinance
+                        df_stock_raw = data.xs(key=symbol, axis=1, level=ticker_level)
+                        df = df_stock_raw.dropna(subset=["Close", "Volume"]).copy()
+                        
+                        if df.empty or len(df) < 40:
                             failed_count += 1
                             continue
+
+                        close = df["Close"].squeeze()
+                        volume = df["Volume"].squeeze()
+                        high = df["High"].squeeze()
+                        low = df["Low"].squeeze()
+
+                        # חישוב אינדיקטורים
+                        obv_series = ta.volume.OnBalanceVolumeIndicator(close, volume).on_balance_volume()
+                        obv_sma = obv_series.rolling(obv_sma_period).mean()
+
+                        df["OBV"] = obv_series
+                        df["OBV_SMA"] = obv_sma
+                        df["RSI"] = ta.momentum.RSIIndicator(close, window=rsi_period).rsi()
+                        df["CMF"] = ta.volume.ChaikinMoneyFlowIndicator(high, low, close, volume, window=20).chaikin_money_flow()
+                        df["SMA200"] = close.rolling(200).mean()
+
+                        if not spy_data.empty:
+                            df["Close_spy"] = spy_data["Close"]
+
+                        is_above_now = obv_series.iloc[-1] > obv_sma.iloc[-1]
+                        sec = stock_sector_dict.get(symbol, "General")
+
+                        is_above_series = obv_series > obv_sma
+                        last_30_days = is_above_series.tail(30)
+                        for date, status in last_30_days.items():
+                            daily_status_list.append({
+                                "Date": date,
+                                "Sector": sec,
+                                "Is_Positive": 1 if status else 0
+                            })
+
+                        consecutive_days = 0
+                        for val in reversed(is_above_series):
+                            if val:
+                                consecutive_days += 1
+                            else:
+                                break
+
+                        pct_change_since_cross = 0.0
+                        if consecutive_days > 0 and consecutive_days < len(df):
+                            cross_day_price = close.iloc[-consecutive_days]
+                            pct_change_since_cross = ((close.iloc[-1] - cross_day_price) / cross_day_price) * 100
+
+                        estimated_cap = int(close.iloc[-1] * volume.rolling(20).mean().iloc[-1])
+                        if pd.isna(estimated_cap) or estimated_cap <= 0:
+                            estimated_cap = 1_000_000
+
+                        stock_score = compute_stock_score(df, obv_sma_p=obv_sma_period, rsi_p=rsi_period, rvol_mult=rvol_multiplier)
+
+                        raw_rows.append({
+                            "מניה": symbol, "סקטור_בסיס": sec, "is_above": is_above_now, "ימים ברצף": consecutive_days if is_above_now else -consecutive_days,
+                            "מחיר ($)": round(close.iloc[-1], 2), "RSI": round(df["RSI"].iloc[-1], 1) if not pd.isna(df["RSI"].iloc[-1]) else None,
+                            "CMF": round(df["CMF"].iloc[-1], 3) if not pd.isna(df["CMF"].iloc[-1]) else None,
+                            "שינוי (%)": round(pct_change_since_cross, 2) if is_above_now else round(((close.iloc[-1] - close.iloc[-2]) / close.iloc[-2]) * 100, 2),
+                            "גודל חברה": estimated_cap, "ניקוד (1-10)": stock_score, "df_data": df
+                        })
+
+                        if is_above_now and close.iloc[-1] >= min_price_filter:
+                            all_results.append({
+                                "מניה": symbol, "סקטור": sec, "מחיר אחרון ($)": round(close.iloc[-1], 2), "ימים מעל ממוצע": consecutive_days,
+                                "שינוי מאז החצייה (%)": round(pct_change_since_cross, 2), "RSI": round(df["RSI"].iloc[-1], 1) if not pd.isna(df["RSI"].iloc[-1]) else None,
+                                "CMF": round(df["CMF"].iloc[-1], 3) if not pd.isna(df["CMF"].iloc[-1]) else None, "ניקוד (1-10)": stock_score,
+                                "מחזור מסחר (Volume)": int(volume.iloc[-1]), "raw_data": df
+                            })
+                    except Exception:
+                        failed_count += 1
+                        continue
 
             df_daily = pd.DataFrame(daily_status_list)
             df_trends = pd.DataFrame()
@@ -370,7 +344,7 @@ with tab1:
             st.session_state['treemap_results'] = treemap_data
             st.session_state['trend_results'] = df_trends
             st.session_state['failed_count'] = failed_count
-            st.success(f"✅ הסריקה הושלמה! סורקו {len(raw_rows)} מניות. נכשלו: {failed_count}.")
+            st.success(f"### 🎉 הסריקה הושלמה בהצלחה! סורקו {len(raw_rows)} מניות. נכשלו: {failed_count}.")
 
     if 'scan_sector_results' in st.session_state and 'treemap_results' in st.session_state:
         results = st.session_state['scan_sector_results']
@@ -530,15 +504,17 @@ with tab2:
         with st.spinner("מחשב ומנתח נתונים היסטוריים..."):
             bt_data = load_backtest_data(symbols)
 
-            if "SPY" not in bt_data.columns.levels[0] or "^VIX" not in bt_data.columns.levels[0]:
+            if "SPY" not in bt_data.columns.levels[1 if "SPY" in bt_data.columns.levels[1] else 0]:
                 st.error("שגיאה בטעינת מדדי השוק.")
             else:
                 try:
-                    # שיטוח בטוח של נתוני ה-Backtest ההיסטוריים במקביל
-                    stacked_bt = bt_data.stack(level=1).swaplevel(0, 1).sort_index()
-                    df_spy = stacked_bt.loc["SPY"].copy()
+                    bt_level = 1 if any(sym in bt_data.columns.levels[1] for sym in symbols if sym in bt_data.columns.levels[1]) else 0
+                    spy_bt_close = bt_data.xs(key="SPY", axis=1, level=bt_level)["Close"]
+                    df_spy = pd.DataFrame({"Close": spy_bt_close}).dropna().copy()
                     df_spy["SMA_50"] = df_spy["Close"].squeeze().rolling(50).mean()
-                    df_vix = stacked_bt.loc["^VIX"].copy()
+                    
+                    vix_bt_close = bt_data.xs(key="^VIX", axis=1, level=bt_level)["Close"]
+                    df_vix = pd.DataFrame({"Close": vix_bt_close}).dropna().copy()
                 except Exception:
                     st.error("שגיאה בחילוץ מדדי ייחוס היסטוריים.")
                     df_spy, df_vix = pd.DataFrame(), pd.DataFrame()
@@ -551,11 +527,7 @@ with tab2:
                         if symbol in ["SPY", "^VIX"]:
                             continue
                         try:
-                            if symbol not in stacked_bt.index.levels[0]:
-                                failed_bt += 1
-                                continue
-                            
-                            df = stacked_bt.loc[symbol].copy()
+                            df = bt_data.xs(key=symbol, axis=1, level=bt_level).dropna(subset=["Close", "Volume"]).copy()
                             if len(df) < 245:
                                 continue
                                 
@@ -677,8 +649,8 @@ with tab2:
                             st.download_button(label="⬇️ ייצוא תוצאות Backtest ל-CSV", data=csv_bt.getvalue().encode('utf-8-sig'), file_name="backtest_winners.csv", mime="text/csv")
                         else:
                             st.warning(f"לא נמצאו קומבינציות שעברו את רף ה-{win_rate_threshold}%.")
-                    else:
-                        st.error("לא נאספו מספיק נתונים.")
+                else:
+                    st.error("לא נאספו מספיק נתונים.")
 
 # ==========================================
 # לשונית 3: דוח Top Picks
@@ -691,7 +663,7 @@ with tab3:
     else:
         results_t3 = st.session_state['scan_sector_results']
         if not results_t3:
-            st.warning("לאמצאו מניות חיוביות.")
+            st.warning("לא נמצאו מניות חיוביות.")
         else:
             df_t3 = pd.DataFrame(results_t3).drop(columns=["raw_data"], errors="ignore")
             df_top = df_t3[df_t3["ניקוד (1-10)"] >= 7].sort_values(by=["ניקוד (1-10)", "ימים מעל ממוצע"], ascending=False)
