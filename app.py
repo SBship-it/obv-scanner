@@ -171,12 +171,13 @@ def get_us_symbols_with_sectors():
 @st.cache_data(ttl=3600)
 def load_scanner_data(symbols):
     all_tickers = symbols + ["SPY", "^VIX"]
-    return yf.download(all_tickers, period="1y", interval="1d", progress=False, auto_adjust=False)
+    # הורדה במבנה מילון מובנה לפי טיקרים
+    return yf.download(all_tickers, period="1y", interval="1d", group_by='ticker', progress=False, auto_adjust=False)
 
 @st.cache_data(ttl=86400)
 def load_backtest_data(symbols):
     all_tickers = symbols + ["SPY", "^VIX"]
-    return yf.download(all_tickers, period="2y", interval="1d", progress=False, auto_adjust=False)
+    return yf.download(all_tickers, period="2y", interval="1d", group_by='ticker', progress=False, auto_adjust=False)
 
 def get_active_filters_text(combo):
     filters = []
@@ -226,23 +227,22 @@ with tab1:
             failed_count = 0
 
             if not data.empty:
-                # שליפת נתוני SPY בצורה בטוחה באמצעות .xs (Cross Section) שחוסך את בעיית האינדקסים
+                # שליפת מדד ה-SPY מתוך המבנה המילוני המקובץ של yfinance
                 try:
-                    spy_close = data.xs(key="SPY", axis=1, level=1 if "SPY" in data.columns.levels[1] else 0)["Close"]
-                    spy_data = pd.DataFrame({"Close": spy_close}).dropna()
+                    spy_data = data["SPY"].dropna().copy()
                 except Exception:
                     spy_data = pd.DataFrame()
-
-                # זיהוי אוטומטי באיזו רמה של ה-Columns נמצא הטיקר (0 או 1) לטובת שליפה בטוחה
-                ticker_level = 1 if any(sym in data.columns.levels[1] for sym in symbols if sym in data.columns.levels[1]) else 0
 
                 for symbol in symbols:
                     if symbol in ["SPY", "^VIX"]:
                         continue
                     try:
-                        # שליפת נתוני מניה בטוחה ללא stack או שינוי מבני – חסין לכל גרסת yfinance
-                        df_stock_raw = data.xs(key=symbol, axis=1, level=ticker_level)
-                        df = df_stock_raw.dropna(subset=["Close", "Volume"]).copy()
+                        # שליפה מילונית ישירה, פשוטה וננקיה משגיאות אינדקס – מותאם לכל גרסת yfinance
+                        if symbol not in data.columns.levels[0]:
+                            failed_count += 1
+                            continue
+                            
+                        df = data[symbol].dropna().copy()
                         
                         if df.empty or len(df) < 40:
                             failed_count += 1
@@ -504,17 +504,13 @@ with tab2:
         with st.spinner("מחשב ומנתח נתונים היסטוריים..."):
             bt_data = load_backtest_data(symbols)
 
-            if "SPY" not in bt_data.columns.levels[1 if "SPY" in bt_data.columns.levels[1] else 0]:
+            if "SPY" not in bt_data.columns.levels[0] or "^VIX" not in bt_data.columns.levels[0]:
                 st.error("שגיאה בטעינת מדדי השוק.")
             else:
                 try:
-                    bt_level = 1 if any(sym in bt_data.columns.levels[1] for sym in symbols if sym in bt_data.columns.levels[1]) else 0
-                    spy_bt_close = bt_data.xs(key="SPY", axis=1, level=bt_level)["Close"]
-                    df_spy = pd.DataFrame({"Close": spy_bt_close}).dropna().copy()
+                    df_spy = bt_data["SPY"].dropna().copy()
                     df_spy["SMA_50"] = df_spy["Close"].squeeze().rolling(50).mean()
-                    
-                    vix_bt_close = bt_data.xs(key="^VIX", axis=1, level=bt_level)["Close"]
-                    df_vix = pd.DataFrame({"Close": vix_bt_close}).dropna().copy()
+                    df_vix = bt_data["^VIX"].dropna().copy()
                 except Exception:
                     st.error("שגיאה בחילוץ מדדי ייחוס היסטוריים.")
                     df_spy, df_vix = pd.DataFrame(), pd.DataFrame()
@@ -527,7 +523,11 @@ with tab2:
                         if symbol in ["SPY", "^VIX"]:
                             continue
                         try:
-                            df = bt_data.xs(key=symbol, axis=1, level=bt_level).dropna(subset=["Close", "Volume"]).copy()
+                            if symbol not in bt_data.columns.levels[0]:
+                                failed_bt += 1
+                                continue
+                            
+                            df = bt_data[symbol].dropna().copy()
                             if len(df) < 245:
                                 continue
                                 
