@@ -217,7 +217,7 @@ if 'selected_sector' not in st.session_state:
     st.session_state['selected_sector'] = "כל השוק"
 
 # ==========================================
-# לשוניות האפליקציה
+# לשונית האפליקציה
 # ==========================================
 tab1, tab2, tab3 = st.tabs([
     "🔍 סורק מניות ומגמות בזמן אמת",
@@ -242,93 +242,104 @@ with tab1:
             failed_count = 0
 
             if not data.empty:
+                # שיטוח וסידור מחדש של ה-DataFrame למניעת בעיות אינדקסים כפולות של yfinance
                 try:
-                    spy_data = pd.DataFrame({"Close": data["Close"]["SPY"]}).dropna()
-                except Exception:
-                    spy_data = pd.DataFrame()
+                    # הפיכת ה-MultiIndex הרחב למבנה שטוח ויציב
+                    stacked_data = data.stack(level=1).swaplevel(0, 1).sort_index()
+                except Exception as e:
+                    st.error(f"שגיאה בעיבוד מבנה הנתונים המרכזי: {e}")
+                    stacked_data = pd.DataFrame()
 
-                for symbol in symbols:
-                    if symbol in ["SPY", "^VIX"]:
-                        continue
+                if not stacked_data.empty:
+                    # שליפת נתוני SPY
                     try:
-                        # שליפת נתוני המניה הספציפית מתוך ה-DataFrame הרחב בצורה מפורשת ומאובטחת
-                        df = pd.DataFrame({
-                            "Open": data["Open"][symbol],
-                            "High": data["High"][symbol],
-                            "Low": data["Low"][symbol],
-                            "Close": data["Close"][symbol],
-                            "Volume": data["Volume"][symbol]
-                        }).dropna()
+                        spy_data = stacked_data.loc["SPY"].copy()
+                    except Exception:
+                        spy_data = pd.DataFrame()
 
-                        if df.empty or len(df) < 40:
+                    for symbol in symbols:
+                        if symbol in ["SPY", "^VIX"]:
+                            continue
+                        try:
+                            # שליפת נתוני המניה בצורה מאובטחת וישירה מהאינדקס השטוח
+                            if symbol not in stacked_data.index.levels[0]:
+                                failed_count += 1
+                                continue
+                                
+                            df = stacked_data.loc[symbol].copy()
+                            if df.empty or len(df) < 40:
+                                failed_count += 1
+                                continue
+
+                            # הבטחת שמות עמודות תקינים ונקיים משאריות טיפוסים של yfinance
+                            df.columns = [str(c) for c in df.columns]
+                            
+                            close = df["Close"].squeeze()
+                            volume = df["Volume"].squeeze()
+                            high = df["High"].squeeze()
+                            low = df["Low"].squeeze()
+
+                            # חישוב אינדיקטורים
+                            obv_series = ta.volume.OnBalanceVolumeIndicator(close, volume).on_balance_volume()
+                            obv_sma = obv_series.rolling(obv_sma_period).mean()
+
+                            df["OBV"] = obv_series
+                            df["OBV_SMA"] = obv_sma
+                            df["RSI"] = ta.momentum.RSIIndicator(close, window=rsi_period).rsi()
+                            df["CMF"] = ta.volume.ChaikinMoneyFlowIndicator(high, low, close, volume, window=20).chaikin_money_flow()
+                            df["SMA200"] = close.rolling(200).mean()
+
+                            if not spy_data.empty:
+                                df["Close_spy"] = spy_data["Close"]
+
+                            is_above_now = obv_series.iloc[-1] > obv_sma.iloc[-1]
+                            sec = stock_sector_dict.get(symbol, "General")
+
+                            is_above_series = obv_series > obv_sma
+                            last_30_days = is_above_series.tail(30)
+                            for date, status in last_30_days.items():
+                                daily_status_list.append({
+                                    "Date": date,
+                                    "Sector": sec,
+                                    "Is_Positive": 1 if status else 0
+                                })
+
+                            consecutive_days = 0
+                            for val in reversed(is_above_series):
+                                if val:
+                                    consecutive_days += 1
+                                else:
+                                    break
+
+                            pct_change_since_cross = 0.0
+                            if consecutive_days > 0 and consecutive_days < len(df):
+                                cross_day_price = close.iloc[-consecutive_days]
+                                pct_change_since_cross = ((close.iloc[-1] - cross_day_price) / cross_day_price) * 100
+
+                            estimated_cap = int(close.iloc[-1] * volume.rolling(20).mean().iloc[-1])
+                            if pd.isna(estimated_cap) or estimated_cap <= 0:
+                                estimated_cap = 1_000_000
+
+                            stock_score = compute_stock_score(df, obv_sma_p=obv_sma_period, rsi_p=rsi_period, rvol_mult=rvol_multiplier)
+
+                            raw_rows.append({
+                                "מניה": symbol, "סקטור_בסיס": sec, "is_above": is_above_now, "ימים ברצף": consecutive_days if is_above_now else -consecutive_days,
+                                "מחיר ($)": round(close.iloc[-1], 2), "RSI": round(df["RSI"].iloc[-1], 1) if not pd.isna(df["RSI"].iloc[-1]) else None,
+                                "CMF": round(df["CMF"].iloc[-1], 3) if not pd.isna(df["CMF"].iloc[-1]) else None,
+                                "שינוי (%)": round(pct_change_since_cross, 2) if is_above_now else round(((close.iloc[-1] - close.iloc[-2]) / close.iloc[-2]) * 100, 2),
+                                "גודל חברה": estimated_cap, "ניקוד (1-10)": stock_score, "df_data": df
+                            })
+
+                            if is_above_now and close.iloc[-1] >= min_price_filter:
+                                all_results.append({
+                                    "מניה": symbol, "סקטור": sec, "מחיר אחרון ($)": round(close.iloc[-1], 2), "ימים מעל ממוצע": consecutive_days,
+                                    "שינוי מאז החצייה (%)": round(pct_change_since_cross, 2), "RSI": round(df["RSI"].iloc[-1], 1) if not pd.isna(df["RSI"].iloc[-1]) else None,
+                                    "CMF": round(df["CMF"].iloc[-1], 3) if not pd.isna(df["CMF"].iloc[-1]) else None, "ניקוד (1-10)": stock_score,
+                                    "מחזור מסחר (Volume)": int(volume.iloc[-1]), "raw_data": df
+                                })
+                        except Exception:
                             failed_count += 1
                             continue
-
-                        close = df["Close"].squeeze()
-                        volume = df["Volume"].squeeze()
-                        high = df["High"].squeeze()
-                        low = df["Low"].squeeze()
-
-                        obv_series = ta.volume.OnBalanceVolumeIndicator(close, volume).on_balance_volume()
-                        obv_sma = obv_series.rolling(obv_sma_period).mean()
-
-                        df["OBV"] = obv_series
-                        df["OBV_SMA"] = obv_sma
-                        df["RSI"] = ta.momentum.RSIIndicator(close, window=rsi_period).rsi()
-                        df["CMF"] = ta.volume.ChaikinMoneyFlowIndicator(high, low, close, volume, window=20).chaikin_money_flow()
-                        df["SMA200"] = close.rolling(200).mean()
-
-                        if not spy_data.empty:
-                            df["Close_spy"] = spy_data["Close"]
-
-                        is_above_now = obv_series.iloc[-1] > obv_sma.iloc[-1]
-                        sec = stock_sector_dict.get(symbol, "General")
-
-                        is_above_series = obv_series > obv_sma
-                        last_30_days = is_above_series.tail(30)
-                        for date, status in last_30_days.items():
-                            daily_status_list.append({
-                                "Date": date,
-                                "Sector": sec,
-                                "Is_Positive": 1 if status else 0
-                            })
-
-                        consecutive_days = 0
-                        for val in reversed(is_above_series):
-                            if val:
-                                consecutive_days += 1
-                            else:
-                                break
-
-                        pct_change_since_cross = 0.0
-                        if consecutive_days > 0 and consecutive_days < len(df):
-                            cross_day_price = close.iloc[-consecutive_days]
-                            pct_change_since_cross = ((close.iloc[-1] - cross_day_price) / cross_day_price) * 100
-
-                        estimated_cap = int(close.iloc[-1] * volume.rolling(20).mean().iloc[-1])
-                        if pd.isna(estimated_cap) or estimated_cap <= 0:
-                            estimated_cap = 1_000_000
-
-                        stock_score = compute_stock_score(df, obv_sma_p=obv_sma_period, rsi_p=rsi_period, rvol_mult=rvol_multiplier)
-
-                        raw_rows.append({
-                            "מניה": symbol, "סקטור_בסיס": sec, "is_above": is_above_now, "ימים ברצף": consecutive_days if is_above_now else -consecutive_days,
-                            "מחיר ($)": round(close.iloc[-1], 2), "RSI": round(df["RSI"].iloc[-1], 1) if not pd.isna(df["RSI"].iloc[-1]) else None,
-                            "CMF": round(df["CMF"].iloc[-1], 3) if not pd.isna(df["CMF"].iloc[-1]) else None,
-                            "שינוי (%)": round(pct_change_since_cross, 2) if is_above_now else round(((close.iloc[-1] - close.iloc[-2]) / close.iloc[-2]) * 100, 2),
-                            "גודל חברה": estimated_cap, "ניקוד (1-10)": stock_score, "df_data": df
-                        })
-
-                        if is_above_now and close.iloc[-1] >= min_price_filter:
-                            all_results.append({
-                                "מניה": symbol, "סקטור": sec, "מחיר אחרון ($)": round(close.iloc[-1], 2), "ימים מעל ממוצע": consecutive_days,
-                                "שינוי מאז החצייה (%)": round(pct_change_since_cross, 2), "RSI": round(df["RSI"].iloc[-1], 1) if not pd.isna(df["RSI"].iloc[-1]) else None,
-                                "CMF": round(df["CMF"].iloc[-1], 3) if not pd.isna(df["CMF"].iloc[-1]) else None, "ניקוד (1-10)": stock_score,
-                                "מחזור מסחר (Volume)": int(volume.iloc[-1]), "raw_data": df
-                            })
-                    except Exception:
-                        failed_count += 1
-                        continue
 
             df_daily = pd.DataFrame(daily_status_list)
             df_trends = pd.DataFrame()
@@ -523,9 +534,11 @@ with tab2:
                 st.error("שגיאה בטעינת מדדי השוק.")
             else:
                 try:
-                    df_spy = pd.DataFrame({"Close": bt_data["Close"]["SPY"]}).dropna().copy()
+                    # שיטוח בטוח של נתוני ה-Backtest ההיסטוריים במקביל
+                    stacked_bt = bt_data.stack(level=1).swaplevel(0, 1).sort_index()
+                    df_spy = stacked_bt.loc["SPY"].copy()
                     df_spy["SMA_50"] = df_spy["Close"].squeeze().rolling(50).mean()
-                    df_vix = pd.DataFrame({"Close": bt_data["Close"]["^VIX"]}).dropna().copy()
+                    df_vix = stacked_bt.loc["^VIX"].copy()
                 except Exception:
                     st.error("שגיאה בחילוץ מדדי ייחוס היסטוריים.")
                     df_spy, df_vix = pd.DataFrame(), pd.DataFrame()
@@ -538,18 +551,11 @@ with tab2:
                         if symbol in ["SPY", "^VIX"]:
                             continue
                         try:
-                            if symbol not in bt_data.columns.levels[0]:
+                            if symbol not in stacked_bt.index.levels[0]:
                                 failed_bt += 1
                                 continue
                             
-                            df = pd.DataFrame({
-                                "Open": bt_data["Open"][symbol],
-                                "High": bt_data["High"][symbol],
-                                "Low": bt_data["Low"][symbol],
-                                "Close": bt_data["Close"][symbol],
-                                "Volume": bt_data["Volume"][symbol]
-                            }).dropna()
-
+                            df = stacked_bt.loc[symbol].copy()
                             if len(df) < 245:
                                 continue
                                 
@@ -685,7 +691,7 @@ with tab3:
     else:
         results_t3 = st.session_state['scan_sector_results']
         if not results_t3:
-            st.warning("לא נמצאו מניות חיוביות.")
+            st.warning("לאמצאו מניות חיוביות.")
         else:
             df_t3 = pd.DataFrame(results_t3).drop(columns=["raw_data"], errors="ignore")
             df_top = df_t3[df_t3["ניקוד (1-10)"] >= 7].sort_values(by=["ניקוד (1-10)", "ימים מעל ממוצע"], ascending=False)
