@@ -35,10 +35,10 @@ st.title("🏆 מערכת OBV מתקדמת: Pro-Quant Matrix Ultra")
 with st.sidebar:
     st.header("⚙️ פרמטרים גלובליים")
     obv_sma_period = st.slider("תקופת OBV SMA", min_value=5, max_value=50, value=14, step=1,
-                                help="ממוצע נע של OBV – ברירת מחדל 14 ימים")
+                               help="ממוצע נע של OBV – ברירת מחדל 14 ימים")
     rsi_period = st.slider("תקופת RSI", min_value=7, max_value=21, value=14, step=1)
     rvol_multiplier = st.slider("מכפיל RVOL (נפח חריג)", min_value=1.2, max_value=3.0, value=1.5, step=0.1,
-                                 help="כמה גדול יותר הנפח ביחס לממוצע 20 ימים")
+                                help="כמה גדול יותר הנפח ביחס לממוצע 20 ימים")
     min_price_filter = st.number_input("מחיר מינימלי ($)", min_value=1.0, max_value=50.0, value=5.0, step=1.0)
     min_samples_bt = st.slider("מינימום דגימות (Backtest)", min_value=15, max_value=100, value=30, step=5)
     win_rate_threshold = st.slider("רף Win Rate (%)", min_value=55, max_value=85, value=70, step=5)
@@ -71,10 +71,11 @@ def compute_stock_score(df_stock, obv_sma_p=14, rsi_p=14, rvol_mult=1.5):
         elif rsi >= 70:
             score += 0  # קנוי יתר — לא נותן נקודה
 
-        # מחיר מעל SMA200
-        sma200 = close.rolling(200).mean()
-        if not pd.isna(sma200.iloc[-1]) and close.iloc[-1] > sma200.iloc[-1]:
-            score += 1
+        # מחיר מעל SMA200 (בדיקה בטוחה שיש מספיק נתונים)
+        if len(close) >= 200:
+            sma200 = close.rolling(200).mean()
+            if not pd.isna(sma200.iloc[-1]) and close.iloc[-1] > sma200.iloc[-1]:
+                score += 1
 
         # CMF חיובי
         cmf = ta.volume.ChaikinMoneyFlowIndicator(high, low, close, volume, window=20).chaikin_money_flow().iloc[-1]
@@ -86,7 +87,7 @@ def compute_stock_score(df_stock, obv_sma_p=14, rsi_p=14, rvol_mult=1.5):
         if volume.iloc[-1] > vol_sma20 * rvol_mult:
             score += 1
 
-        # RSI Divergence: מחיר עולה, RSI יורד (divergence שלילי מוריד ניקוד)
+        # RSI Divergence: מחיר עולה, RSI יורד
         rsi_series = ta.momentum.RSIIndicator(close, window=rsi_p).rsi()
         price_up = close.iloc[-1] > close.iloc[-5]
         rsi_down = rsi_series.iloc[-1] < rsi_series.iloc[-5]
@@ -112,7 +113,6 @@ def compute_stock_score(df_stock, obv_sma_p=14, rsi_p=14, rvol_mult=1.5):
 
     return max(1, min(10, score))
 
-
 # ==========================================
 # חישוב p-value בינומי לאמינות סטטיסטית
 # ==========================================
@@ -124,7 +124,6 @@ def binomial_pvalue(win_rate_pct, n_samples, null_hypothesis=0.5):
     wins = int(round(win_rate_pct / 100 * n_samples))
     p_value = stats.binom_test(wins, n_samples, null_hypothesis, alternative='greater')
     return p_value
-
 
 # ==========================================
 # פונקציות נתונים
@@ -174,18 +173,16 @@ def get_us_symbols_with_sectors():
                 "AMZN": "Consumer Cyclical", "META": "Communication Services", "NVDA": "Technology"}
     return symbol_to_sector
 
-
 @st.cache_data(ttl=3600)
 def load_scanner_data(symbols):
     all_tickers = symbols + ["SPY", "^VIX"]
-    return yf.download(all_tickers, period="6mo", interval="1d", group_by='ticker', progress=False, auto_adjust=True)
-
+    # תקופה שונתה ל-1y ובוטל ה-auto_adjust כדי למנוע קריסה
+    return yf.download(all_tickers, period="1y", interval="1d", group_by='ticker', progress=False, auto_adjust=False)
 
 @st.cache_data(ttl=86400)
 def load_backtest_data(symbols):
     all_tickers = symbols + ["SPY", "^VIX"]
-    return yf.download(all_tickers, period="2y", interval="1d", group_by='ticker', progress=False, auto_adjust=True)
-
+    return yf.download(all_tickers, period="2y", interval="1d", group_by='ticker', progress=False, auto_adjust=False)
 
 def get_active_filters_text(combo):
     filters = []
@@ -200,7 +197,6 @@ def get_active_filters_text(combo):
     if combo[8]: filters.append("רוחב שוק > 55%")
     return " | ".join(filters) if filters else "ללא מסננים (OBV בלבד)"
 
-
 # ==========================================
 # Session State
 # ==========================================
@@ -211,7 +207,7 @@ if 'selected_sector' not in st.session_state:
     st.session_state['selected_sector'] = "כל השוק"
 
 # ==========================================
-# לשוניות
+# לשונית
 # ==========================================
 tab1, tab2, tab3 = st.tabs([
     "🔍 סורק מניות ומגמות בזמן אמת",
@@ -573,7 +569,7 @@ with tab2:
     st.write(f"מחפש שילובי מסננים שהשיגו >{win_rate_threshold}% Win Rate על נתונים היסטוריים. כל שורה כוללת p-value לאמינות סטטיסטית.")
 
     if st.button("🧬 הרץ סריקה מטריציונית מלאה"):
-        with st.spinner("מחשב ומנתח נתונים היסטוריים..."):
+        with st.spinner("مחשב ומנתח נתונים היסטוריים..."):
             bt_data = load_backtest_data(symbols)
 
             if "SPY" not in bt_data.columns.levels[0] or "^VIX" not in bt_data.columns.levels[0]:
@@ -817,5 +813,5 @@ with tab3:
                     mime="text/csv"
                 )
 
-                # תזכורת: אין כאן המלצת השקעה
+                # תזכורת
                 st.caption("⚠️ הניקוד מבוסס על אינדיקטורים טכניים בלבד ואינו מהווה המלצת השקעה.")
